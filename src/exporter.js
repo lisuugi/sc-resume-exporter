@@ -2,7 +2,7 @@
  * Samsung Careers Resume Exporter
  * 삼성 커리어스 지원서 미리보기 → Markdown / 이미지 내보내기
  *
- * https://github.com/OWNER/sc-resume-exporter
+ * https://github.com/lisuugi/sc-resume-exporter
  * MIT License
  *
  * 비공식 도구입니다. 삼성전자와 무관합니다.
