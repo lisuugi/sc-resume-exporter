@@ -1,0 +1,21 @@
+{
+  "name": "sc-resume-exporter",
+  "version": "1.0.0",
+  "description": "삼성 커리어스 지원서 미리보기를 Markdown/이미지로 내보내는 비공식 북마클릿",
+  "directories": {
+    "doc": "docs",
+    "example": "examples"
+  },
+  "scripts": {
+    "test": "node test/run.mjs",
+    "build": "node build.mjs"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "jsdom": "^30.1.1",
+    "playwright": "^1.63.0",
+    "terser": "^5.51.2"
+  },
+  "type": "module",
+  "private": true
+}
