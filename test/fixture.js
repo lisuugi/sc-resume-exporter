@@ -83,7 +83,6 @@ export const HTML = `
               <p class="dd">[성장 소제목]
 성장과정 본문입니다.</p>
             </div>
-            <!-- 문항에 '전공'이 들어 있어도 마스킹 대상이 아니다. 본문 속 학교·전공·이름은 가려져야 한다. -->
             <div class="dl mFull">
               <h4 class="dt">전공 역량을 기술하십시오.</h4>
               <p class="dd">[전공 소제목]

@@ -1,6 +1,6 @@
 {
   "name": "sc-resume-exporter",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "삼성 커리어스 지원서 미리보기를 Markdown/이미지로 내보내는 비공식 북마클릿",
   "directories": {
     "doc": "docs",

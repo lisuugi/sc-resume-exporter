@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.1.0';
+  var VERSION = '1.2.0';
   var PANEL_ID = '__scre_panel__';
   var H2C_URL = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
 
@@ -296,213 +296,7 @@
   }
 
   /* ===================================================================
-   * 6. 개인정보 마스킹 (선택)
-   *    첨삭 요청·커뮤니티 공유용 사본을 만들 때 쓴다.
-   *
-   *  실제 양식의 라벨 표기를 전부 알 수 없으므로("영문 이름"/"영문성명" 등)
-   *  정확히 일치가 아니라 '키워드 포함'으로 판정한다. 공백을 빼고 소문자로 비교한다.
-   *
-   *  등급은 둘이다.
-   *    2 (IDENTITY)  값을 가리고, 그 값이 문서의 다른 곳(에세이, 다른 표)에
-   *                  다시 나오면 거기서도 가린다. 이름·학교·전공·회사처럼
-   *                  본문에 재등장해 신원을 드러내는 것.
-   *    1 (SENSITIVE) 값만 가린다. 주소·각종 번호처럼 재등장 검사가 무의미하거나,
-   *                  학력("학사")처럼 값이 흔한 단어라 퍼뜨리면 본문을 망가뜨리는 것.
-   *
-   *  에세이 문항("전공 역량을 기술하십시오.")은 키워드가 있어도 대상이 아니다.
-   *  문항째 가리면 첨삭용 사본의 의미가 없어진다.
-   * =================================================================*/
-  var IDENTITY_KEYS = [
-    '지원자', '이름', '성명', '영문', '한자',                 // 이름
-    '학교', '대학', '고교', '캠퍼스', '전공', '학과', '학부',  // 학력
-    '회사', '기관명', '근무처', '직장', '부서'                 // 경력
-  ];
-  var SENSITIVE_KEYS = [
-    '학력', '생년', '생일', '나이', '성별', '사진',
-    '주소', '우편', '거주', '휴대', '전화', '연락처', '메일', 'email',
-    '번호', '학번', '주민', '여권', '군번', '보훈', '장애'
-  ];
-  var QUESTION_RE = /(십시오|하시오|세요|바랍니다|니까|\?)\.?$|기술하|서술하|작성하/;
-  var MASK = '███ (마스킹)';
-
-  function maskLevel(label) {
-    var k = String(label || '').replace(/\s+/g, '').toLowerCase();
-    if (!k || k.length > 25 || QUESTION_RE.test(k)) return 0;
-    function has(keys) {
-      for (var i = 0; i < keys.length; i++) if (k.indexOf(keys[i]) !== -1) return true;
-      return false;
-    }
-    if (has(IDENTITY_KEYS)) return 2;
-    if (has(SENSITIVE_KEYS)) return 1;
-    return 0;
-  }
-
-  // 재등장 검사에 쓸 값. 숫자·기호뿐인 값과 한 글자 값은 오탐이 많아 뺀다.
-  // 본문에는 꾸밈 없이 나오므로 분류 접두어와 괄호를 벗긴 형태도 함께 등록한다.
-  //   "[기타]샘플회사"              → "샘플회사"
-  //   "샘플공학(샘플대-학사-주전공)" → "샘플공학", "샘플대-학사-주전공"
-  // "샘플팀 / 엔지니어" 같은 값은 쪼개지 않는다. 직무명은 흔한 단어라 본문을 망가뜨린다.
-  function collectTerms(value, terms) {
-    function add(v) {
-      v = v.trim();
-      if (v.length < 2 || v === '(없음)' || /^[\d\s.\-\/()~:]+$/.test(v)) return;
-      if (terms.indexOf(v) === -1) terms.push(v);
-    }
-    String(value).split(' | ').forEach(function (v) {
-      add(v);
-      var bare = v.trim().replace(/^\[[^\]]*\]\s*/, '');
-      add(bare);
-      var m = bare.match(/^(.+?)\s*\((.+)\)$/);
-      if (m) { add(m[1]); add(m[2]); }
-    });
-  }
-
-  function termMasker(terms) {
-    if (!terms.length) return function (s) { return String(s); };
-    // 긴 것부터 — "샘플공학(샘플대-학사-주전공)" 을 "샘플대" 보다 먼저 지운다.
-    var re = new RegExp(terms.slice()
-      .sort(function (a, b) { return b.length - a.length; })
-      .map(function (t) { return t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); })
-      .join('|'), 'g');
-    return function (s) { return String(s).replace(re, '███'); };
-  }
-
-  // 라벨과 무관하게 형태로 알아볼 수 있는 것.
-  function maskText(s) {
-    return String(s)
-      .replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '███@███')
-      .replace(/\d{6}\s?-\s?[1-8]\d{6}/g, '██████-███████')                     // 주민·외국인등록번호
-      .replace(/(\+?\d{1,3}[-\s]?)?0?1[016-9][-\s]?\d{3,4}[-\s]?\d{4}/g, '███-████-████') // 휴대폰
-      .replace(/\b0\d{1,2}[-)\s]\d{3,4}-\d{4}\b/g, '███-████-████');             // 유선
-  }
-
-  function maskDoc(doc) {
-    var terms = [];
-    function each(fn) {
-      doc.sections.forEach(function (sec) { sec.blocks.forEach(fn); });
-    }
-
-    // 1) 라벨 기준으로 가리면서 재등장 검사용 값을 모은다.
-    each(function (b) {
-      if (b.type === 'field' || b.type === 'longfield') {
-        var lv = maskLevel(b.label);
-        if (!lv) return;
-        if (lv === 2) collectTerms(b.value, terms);
-        b.type = 'field';
-        b.value = MASK;
-      } else if (b.type === 'table') {
-        var levels = b.rows[0].map(maskLevel);
-        b.rows = b.rows.map(function (r, ri) {
-          if (ri === 0) return r;
-          return r.map(function (cell, ci) {
-            if (!levels[ci]) return cell;
-            if (levels[ci] === 2) collectTerms(cell, terms);
-            return '███';
-          });
-        });
-      }
-    });
-
-    // 2) 나머지 전부에서 재등장 값과 형태 기반 패턴을 지운다.
-    var hide = termMasker(terms);
-    function scrub(s) { return maskText(hide(s)); }
-    each(function (b) {
-      if (b.type === 'field' || b.type === 'longfield' || b.type === 'text') b.value = scrub(b.value);
-      else if (b.type === 'heading') b.text = scrub(b.text);
-      else if (b.type === 'table') {
-        b.rows = b.rows.map(function (r, ri) { return ri === 0 ? r : r.map(scrub); });
-      }
-    });
-    return doc;
-  }
-
-  /*
-   *  이미지용 마스킹 — 모델이 아니라 화면(DOM)의 글자를 직접 바꾼다.
-   *
-   *  요소를 교체하지 않고 텍스트 노드의 data 만 바꾼다. 페이지의 프레임워크가
-   *  쥐고 있는 노드 참조가 그대로 유지되어야 원상복구 후에도 화면이 정상 동작한다.
-   *  바꾼 노드와 원래 값은 rec 에 기록하고, 캡처가 끝나면 역순으로 되돌린다.
-   *
-   *  모델 마스킹(maskDoc)과 같은 규칙을 쓴다.
-   *    (a) 민감 라벨의 .dl 값 전체   (b) 표의 민감 열
-   *    (c) 나머지 글에서 재등장 값과 형태 기반 패턴(이메일·전화·등록번호)
-   *  사진 같은 그림 요소는 captureImage 가 따로 숨긴다(스타일 복구 경로를 쓰므로).
-   */
-  function textNodes(el) {
-    var out = [];
-    var w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null, false);
-    var n;
-    while ((n = w.nextNode())) out.push(n);
-    return out;
-  }
-
-  function maskDom(root, rec) {
-    function setText(node, v) {
-      if (node.data === v) return;
-      rec.push({ node: node, data: node.data });
-      node.data = v;
-    }
-    // 다중값(국내 | 상세주소 등)은 첫 노드에만 표기를 남기고 나머지는 비운다.
-    function blank(el, mark) {
-      var first = true;
-      textNodes(el).forEach(function (n) {
-        if (!n.data.trim()) return;
-        setText(n, first ? mark : '');
-        first = false;
-      });
-    }
-
-    var terms = [];
-
-    // (a)
-    var dls = root.querySelectorAll('.dl');
-    for (var i = 0; i < dls.length; i++) {
-      var dt = dls[i].querySelector('.dt');
-      var dd = dls[i].querySelector('.dd');
-      if (!dt || !dd) continue;
-      var lv = maskLevel(readLabel(dt));
-      if (!lv) continue;
-      if (lv === 2) collectTerms(readValue(dd), terms);
-      blank(dd, MASK);
-    }
-
-    // (b) — 첫 행을 헤더로 본다(pushTable 과 같은 가정).
-    var tables = root.querySelectorAll('table');
-    for (var t = 0; t < tables.length; t++) {
-      var trs = tables[t].querySelectorAll('tr');
-      if (trs.length < 2) continue;
-      var levels = [];
-      for (var h = 0; h < trs[0].children.length; h++) levels.push(maskLevel(readLabel(trs[0].children[h])));
-      for (var r = 1; r < trs.length; r++) {
-        for (var c = 0; c < trs[r].children.length; c++) {
-          var cell = trs[r].children[c];
-          if (!levels[c]) continue;
-          if (levels[c] === 2) collectTerms((cell.innerText || '').trim().replace(/\s+/g, ' '), terms);
-          blank(cell, '███');
-        }
-      }
-    }
-
-    // (c)
-    var hide = termMasker(terms);
-    textNodes(root).forEach(function (n) {
-      var m = maskText(hide(n.data));
-      if (m !== n.data) setText(n, m);
-    });
-  }
-
-  // 사진·그림 요소. 증명사진이 가장 강한 식별 정보다.
-  function mediaToHide(root) {
-    var out = Array.prototype.slice.call(root.querySelectorAll('img,picture,canvas,video,svg'));
-    var all = root.querySelectorAll('*');
-    for (var i = 0; i < all.length; i++) {
-      if (out.indexOf(all[i]) === -1 && /url\(/.test(getComputedStyle(all[i]).backgroundImage || '')) out.push(all[i]);
-    }
-    return out;
-  }
-
-  /* ===================================================================
-   * 7. 렌더링 — 모델 → Markdown
+   * 6. 렌더링 — 모델 → Markdown
    * =================================================================*/
   function esc(s) { return String(s).replace(/\|/g, '\\|'); }
 
@@ -542,18 +336,17 @@
     return String(s).replace(/"/g, '\\"');
   }
 
-  function render(doc, opts) {
+  function render(doc) {
     var out = [];
     var applicant = findField(doc, '지원자') || '(미상)';
 
     out.push('---');
     out.push('document_type: 입사 지원서 (Samsung Careers 미리보기 추출본)');
     out.push('recruitment: "' + yamlSafe(doc.title) + '"');
-    if (!opts.mask) out.push('applicant: "' + yamlSafe(applicant) + '"');
+    out.push('applicant: "' + yamlSafe(applicant) + '"');
     out.push('extracted_at: ' + today());
     out.push('source: samsungcareers.com 지원서 미리보기 모달');
     out.push('generated_by: sc-resume-exporter v' + VERSION);
-    if (opts.mask) out.push('privacy: 개인정보 마스킹 적용됨');
     out.push('---');
     out.push('');
 
@@ -601,7 +394,7 @@
   }
 
   /* ===================================================================
-   * 8. 다운로드
+   * 7. 다운로드
    * =================================================================*/
   function safeName(s) {
     return String(s).replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_').slice(0, 80);
@@ -619,7 +412,7 @@
   }
 
   /* ===================================================================
-   * 9. 이미지 캡처
+   * 8. 이미지 캡처
    *
    *  모달은 세 겹으로 잘려 있다.
    *    #formPreview  position:fixed        → 페이지 스크롤로 접근 불가
@@ -643,8 +436,6 @@
 
   function captureImage(ctx, opts, onProgress) {
     var undo = [];
-    var texts = []; // maskDom 이 바꾼 텍스트 노드
-
     function set(el, css) {
       undo.push({ el: el, css: el.style.cssText });
       el.style.cssText += ';' + css;
@@ -681,11 +472,6 @@
           set(wraps[i], 'overflow:visible!important;width:auto!important');
         }
 
-        if (opts.mask) {
-          onProgress('개인정보 가리는 중…');
-          maskDom(ctx.root, texts);
-          mediaToHide(ctx.root).forEach(function (el) { set(el, 'visibility:hidden!important'); });
-        }
 
         body.scrollTop = 0;
         window.scrollTo(0, 0);
@@ -721,7 +507,6 @@
       })
       .finally(function () {
         // 원상복구 — 어떤 경로로 끝나든 반드시 실행
-        for (var j = texts.length - 1; j >= 0; j--) texts[j].node.data = texts[j].data;
         for (var i = undo.length - 1; i >= 0; i--) undo[i].el.style.cssText = undo[i].css;
         if (parent) parent.insertBefore(wrap, next);
         body.scrollTop = bodyScroll;
@@ -730,7 +515,7 @@
   }
 
   /* ===================================================================
-   * 10. UI — Shadow DOM 으로 격리해 페이지 스타일과 충돌하지 않게 한다.
+   * 9. UI — Shadow DOM 으로 격리해 페이지 스타일과 충돌하지 않게 한다.
    * =================================================================*/
   var CSS = [
     ':host{all:initial}',
@@ -741,6 +526,7 @@
     '.hd{display:flex;align-items:center;justify-content:space-between;',
     'padding:11px 14px;background:#111;color:#fff}',
     '.hd b{font-size:13px;font-weight:600;letter-spacing:-.01em}',
+    '.hd .v{margin-left:7px;font-size:11px;font-weight:400;color:#9aa0a6;letter-spacing:0}',
     '.hd button{all:unset;cursor:pointer;font-size:17px;line-height:1;padding:2px 5px;',
     'border-radius:5px;color:#bbb}',
     '.hd button:hover{background:rgba(255,255,255,.14);color:#fff}',
@@ -753,10 +539,7 @@
     'button.act.s{background:#f2f3f5;color:#222;border-color:#e0e1e4}',
     'button.act.s:hover{background:#e8e9ec}',
     'button.act[disabled]{opacity:.45;cursor:not-allowed}',
-    '.opt{display:flex;align-items:center;gap:7px;margin:10px 0 12px;color:#444;font-size:12px}',
-    '.opt input{margin:0;cursor:pointer}',
-    '.opt label{cursor:pointer;user-select:none}',
-    '.st{min-height:17px;font-size:12px;color:#666;word-break:keep-all;line-height:1.5}',
+    '.st{min-height:17px;margin-top:4px;font-size:12px;color:#666;word-break:keep-all;line-height:1.5}',
     '.st.err{color:#c0392b}',
     '.st.ok{color:#1e7e34}',
     '.ft{border-top:1px solid #eee;padding:9px 14px;font-size:11px;color:#999;line-height:1.5}',
@@ -774,18 +557,17 @@
     var box = document.createElement('div');
     box.className = 'box';
     box.innerHTML =
-      '<div class="hd"><b>지원서 내보내기</b><button title="닫기">×</button></div>' +
+      '<div class="hd"><b>지원서 내보내기<span class="v">v' + VERSION + '</span></b>' +
+      '<button title="닫기">×</button></div>' +
       '<div class="bd">' +
       '<button class="act p" data-a="md">Markdown 추출</button>' +
       '<button class="act s" data-a="img">전체 이미지 캡처</button>' +
-      '<div class="opt"><input type="checkbox" id="mk"><label for="mk">개인정보 마스킹</label></div>' +
       '<div class="st"></div>' +
       '</div>' +
       '<div class="ft">비공식 도구 · 삼성전자와 무관<br>모든 처리는 이 브라우저 안에서만 실행됩니다.</div>';
     sh.appendChild(box);
 
     var status = box.querySelector('.st');
-    var maskBox = box.querySelector('#mk');
     var buttons = box.querySelectorAll('button.act');
 
     function say(msg, kind) {
@@ -798,9 +580,9 @@
 
     box.querySelector('.hd button').onclick = function () { host.remove(); };
 
-    function baseName(mask) {
+    function baseName() {
       var doc = buildModel(ctx.root);
-      var who = mask ? '마스킹' : findField(doc, '지원자');
+      var who = findField(doc, '지원자');
       var title = doc.title || '지원서';
       return safeName(title + (who ? '_' + who : ''));
     }
@@ -809,10 +591,9 @@
       try {
         say('추출 중…');
         var doc = buildModel(ctx.root);
-        if (maskBox.checked) maskDoc(doc);
-        var md = render(doc, { mask: maskBox.checked });
+        var md = render(doc);
         var n = md.split('\n').length;
-        download(new Blob([md], { type: 'text/markdown;charset=utf-8' }), baseName(maskBox.checked) + '.md');
+        download(new Blob([md], { type: 'text/markdown;charset=utf-8' }), baseName() + '.md');
         say('완료 — ' + md.length.toLocaleString() + '자 / ' + n + '줄 다운로드됨', 'ok');
       } catch (e) {
         say('실패: ' + e.message, 'err');
@@ -820,15 +601,13 @@
     };
 
     box.querySelector('[data-a="img"]').onclick = function () {
-      var mask = maskBox.checked;
       lock(true);
       say('준비 중…');
-      captureImage(ctx, { mask: mask }, say)
+      captureImage(ctx, {}, say)
         .then(function (r) {
-          download(r.blob, baseName(mask) + '.jpg');
+          download(r.blob, baseName() + '.jpg');
           say('완료 — ' + r.canvas.width + '×' + r.canvas.height + 'px, ' +
-            Math.round(r.blob.size / 1024).toLocaleString() + 'KB' +
-            (mask ? ' (마스킹 적용)' : ''), 'ok');
+            Math.round(r.blob.size / 1024).toLocaleString() + 'KB', 'ok');
         })
         .catch(function (e) { say('실패: ' + e.message, 'err'); })
         .finally(function () { lock(false); });
@@ -846,7 +625,7 @@
   }
 
   /* ===================================================================
-   * 11. 부트
+   * 10. 부트
    * =================================================================*/
   var ctx = findModal();
   if (!ctx) {

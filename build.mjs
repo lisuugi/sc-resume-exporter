@@ -45,6 +45,10 @@ html = html.replace(
   /(<textarea[^>]*id="raw"[^>]*>)[\s\S]*?(<\/textarea>)/,
   (_m, a, b) => a + min.replace(/</g, '&lt;').replace(/>/g, '&gt;') + b
 );
+// 패널에 뜨는 버전과 대조할 수 있도록 안내 페이지에도 버전을 적는다.
+const version = (src.match(/var VERSION = '([^']+)'/) || [])[1];
+if (!version) throw new Error('src/exporter.js 에서 VERSION 을 찾지 못했습니다.');
+html = html.replace(/(<span id="ver">)[^<]*(<\/span>)/, (_m, a, b) => a + 'v' + version + b);
 
 if (html === before) {
   console.warn('! index.html 주입 지점(#bm / #raw)을 찾지 못했습니다.');
