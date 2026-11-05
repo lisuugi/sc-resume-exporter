@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.0.0';
+  var VERSION = '1.1.0';
   var PANEL_ID = '__scre_panel__';
   var H2C_URL = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
 
@@ -299,7 +299,8 @@
    * 6. 개인정보 마스킹 (선택)
    *    저장소·커뮤니티에 예시로 올릴 때를 위한 기능.
    * =================================================================*/
-  var SENSITIVE_LABELS = ['주소', '휴대폰 번호', '전화 번호', '이메일', '자격번호', '학번'];
+  var SENSITIVE_LABELS = ['지원자', '생년월일', '주소', '휴대폰 번호', '전화 번호', '이메일', '자격번호', '학번'];
+  var MASK = '███ (마스킹)';
 
   function maskText(s) {
     return String(s)
@@ -311,7 +312,7 @@
     doc.sections.forEach(function (sec) {
       sec.blocks.forEach(function (b) {
         if (b.type === 'field' || b.type === 'longfield') {
-          if (SENSITIVE_LABELS.indexOf(b.label) !== -1) b.value = '███ (마스킹)';
+          if (SENSITIVE_LABELS.indexOf(b.label) !== -1) b.value = MASK;
           else b.value = maskText(b.value);
         } else if (b.type === 'table') {
           var hdr = b.rows[0];
@@ -328,6 +329,72 @@
       });
     });
     return doc;
+  }
+
+  /*
+   *  이미지용 마스킹 — 모델이 아니라 화면(DOM)의 글자를 직접 바꾼다.
+   *
+   *  요소를 교체하지 않고 텍스트 노드의 data 만 바꾼다. 페이지의 프레임워크가
+   *  쥐고 있는 노드 참조가 그대로 유지되어야 원상복구 후에도 화면이 정상 동작한다.
+   *  바꾼 노드와 원래 값은 rec 에 기록하고, 캡처가 끝나면 역순으로 되돌린다.
+   *
+   *  모델 마스킹(maskDoc)과 같은 규칙을 쓴다.
+   *    (a) 민감 라벨의 .dl 값 전체   (b) 표의 민감 열   (c) 나머지 글의 이메일·전화번호
+   */
+  function textNodes(el) {
+    var out = [];
+    var w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null, false);
+    var n;
+    while ((n = w.nextNode())) out.push(n);
+    return out;
+  }
+
+  function maskDom(root, rec) {
+    function setText(node, v) {
+      if (node.data === v) return;
+      rec.push({ node: node, data: node.data });
+      node.data = v;
+    }
+    // 다중값(국내 | 상세주소 등)은 첫 노드에만 표기를 남기고 나머지는 비운다.
+    function blank(el, mark) {
+      var first = true;
+      textNodes(el).forEach(function (n) {
+        if (!n.data.trim()) return;
+        setText(n, first ? mark : '');
+        first = false;
+      });
+    }
+
+    // (a)
+    var dls = root.querySelectorAll('.dl');
+    for (var i = 0; i < dls.length; i++) {
+      var dt = dls[i].querySelector('.dt');
+      var dd = dls[i].querySelector('.dd');
+      if (dt && dd && SENSITIVE_LABELS.indexOf(readLabel(dt)) !== -1) blank(dd, MASK);
+    }
+
+    // (b) — 첫 행을 헤더로 본다(pushTable 과 같은 가정).
+    var tables = root.querySelectorAll('table');
+    for (var t = 0; t < tables.length; t++) {
+      var trs = tables[t].querySelectorAll('tr');
+      if (trs.length < 2) continue;
+      var cols = [];
+      for (var h = 0; h < trs[0].children.length; h++) {
+        if (SENSITIVE_LABELS.indexOf(readLabel(trs[0].children[h])) !== -1) cols.push(h);
+      }
+      if (!cols.length) continue;
+      for (var r = 1; r < trs.length; r++) {
+        cols.forEach(function (c) {
+          if (trs[r].children[c]) blank(trs[r].children[c], '███');
+        });
+      }
+    }
+
+    // (c)
+    textNodes(root).forEach(function (n) {
+      var m = maskText(n.data);
+      if (m !== n.data) setText(n, m);
+    });
   }
 
   /* ===================================================================
@@ -472,6 +539,8 @@
 
   function captureImage(ctx, opts, onProgress) {
     var undo = [];
+    var texts = []; // maskDom 이 바꾼 텍스트 노드
+
     function set(el, css) {
       undo.push({ el: el, css: el.style.cssText });
       el.style.cssText += ';' + css;
@@ -508,6 +577,11 @@
           set(wraps[i], 'overflow:visible!important;width:auto!important');
         }
 
+        if (opts.mask) {
+          onProgress('개인정보 가리는 중…');
+          maskDom(ctx.root, texts);
+        }
+
         body.scrollTop = 0;
         window.scrollTo(0, 0);
 
@@ -542,6 +616,7 @@
       })
       .finally(function () {
         // 원상복구 — 어떤 경로로 끝나든 반드시 실행
+        for (var j = texts.length - 1; j >= 0; j--) texts[j].node.data = texts[j].data;
         for (var i = undo.length - 1; i >= 0; i--) undo[i].el.style.cssText = undo[i].css;
         if (parent) parent.insertBefore(wrap, next);
         body.scrollTop = bodyScroll;
@@ -618,9 +693,9 @@
 
     box.querySelector('.hd button').onclick = function () { host.remove(); };
 
-    function baseName() {
+    function baseName(mask) {
       var doc = buildModel(ctx.root);
-      var who = findField(doc, '지원자');
+      var who = mask ? '마스킹' : findField(doc, '지원자');
       var title = doc.title || '지원서';
       return safeName(title + (who ? '_' + who : ''));
     }
@@ -632,7 +707,7 @@
         if (maskBox.checked) maskDoc(doc);
         var md = render(doc, { mask: maskBox.checked });
         var n = md.split('\n').length;
-        download(new Blob([md], { type: 'text/markdown;charset=utf-8' }), baseName() + '.md');
+        download(new Blob([md], { type: 'text/markdown;charset=utf-8' }), baseName(maskBox.checked) + '.md');
         say('완료 — ' + md.length.toLocaleString() + '자 / ' + n + '줄 다운로드됨', 'ok');
       } catch (e) {
         say('실패: ' + e.message, 'err');
@@ -640,13 +715,15 @@
     };
 
     box.querySelector('[data-a="img"]').onclick = function () {
+      var mask = maskBox.checked;
       lock(true);
       say('준비 중…');
-      captureImage(ctx, {}, say)
+      captureImage(ctx, { mask: mask }, say)
         .then(function (r) {
-          download(r.blob, baseName() + '.jpg');
+          download(r.blob, baseName(mask) + '.jpg');
           say('완료 — ' + r.canvas.width + '×' + r.canvas.height + 'px, ' +
-            Math.round(r.blob.size / 1024).toLocaleString() + 'KB', 'ok');
+            Math.round(r.blob.size / 1024).toLocaleString() + 'KB' +
+            (mask ? ' (마스킹 적용)' : ''), 'ok');
         })
         .catch(function (e) { say('실패: ' + e.message, 'err'); })
         .finally(function () { lock(false); });

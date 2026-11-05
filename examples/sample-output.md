@@ -4,7 +4,7 @@ recruitment: "20XX년 상반기 신입사원 채용 공고 (샘플부문)"
 applicant: "홍길동"
 extracted_at: 2026-09-28
 source: samsungcareers.com 지원서 미리보기 모달
-generated_by: sc-resume-exporter v1.0.0
+generated_by: sc-resume-exporter v1.1.0
 ---
 
 # 20XX년 상반기 신입사원 채용 공고 (샘플부문)

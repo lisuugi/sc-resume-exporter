@@ -140,6 +140,9 @@ sh.querySelector('[data-a="md"]').click();
 check('주소 마스킹', md.includes('- **주소**: ███ (마스킹)'));
 check('휴대폰 마스킹', md.includes('- **휴대폰 번호**: ███ (마스킹)'));
 check('지원자명 front matter 제외', !/^applicant:/m.test(md));
+check('지원자명 본문 마스킹', md.includes('- **지원자**: ███ (마스킹)') && !md.includes('홍길동'));
+check('파일명에 지원자명 미포함', !/홍길동/.test(captured[0]?.name || '') && /_마스킹\.md$/.test(captured[0]?.name || ''),
+  captured[0]?.name);
 check('마스킹 표기', md.includes('privacy: 개인정보 마스킹 적용됨'));
 check('본문은 유지', md.includes('### 지원 동기를 기술하십시오.'));
 
@@ -147,6 +150,42 @@ console.log('\n[11] 중복 실행 방지');
 const before = window.document.querySelectorAll('#__scre_panel__').length;
 window.eval(src);
 check('패널이 하나만 유지됨', window.document.querySelectorAll('#__scre_panel__').length === before);
+
+// --- 이미지 캡처 -------------------------------------------------------
+// html2canvas 를 가짜로 바꿔, 렌더링 시점에 모달에 적혀 있던 글자를 확보한다.
+// 이 글자가 곧 이미지에 찍히는 내용이다.
+let drawn = null;
+window.html2canvas = (el) => {
+  drawn = el.textContent;
+  return Promise.resolve({ width: 10, height: 20, toBlob: (cb) => cb(new window.Blob(['jpg'])) });
+};
+window.scrollTo = () => {};
+const modalText = () => window.document.querySelector('#formPreview .modalBody').textContent;
+const capture = async () => {
+  captured.length = 0; drawn = null;
+  sh.querySelector('[data-a="img"]').click();
+  for (let i = 0; i < 50 && !captured.length; i++) await new Promise((r) => setTimeout(r, 10));
+};
+const SECRETS = ['홍길동', '어느도 어느시', '+82-010-0000-0000'];
+
+console.log('\n[12] 이미지 캡처 — 마스킹');
+sh.querySelector('#mk').checked = true;
+await capture();
+check('캡처 실행됨', drawn !== null && captured.length === 1, sh.querySelector('.st').textContent);
+check('이미지에 인적사항 없음', drawn !== null && SECRETS.every((s) => !drawn.includes(s)),
+  SECRETS.filter((s) => drawn?.includes(s)).join(', '));
+check('마스킹 표기가 찍힘', (drawn || '').includes('███ (마스킹)'));
+check('본문은 유지', (drawn || '').includes('지원 동기를 기술하십시오.') && (drawn || '').includes('가전공과목'));
+check('캡처 후 화면 원상복구', SECRETS.every((s) => modalText().includes(s)));
+check('모달이 원래 자리로 복귀', !!window.document.querySelector('main.application > #formPreview'));
+check('파일명에 지원자명 미포함', /_마스킹\.jpg$/.test(captured[0]?.name || ''), captured[0]?.name);
+check('완료 문구에 마스킹 표시', sh.querySelector('.st').textContent.includes('마스킹 적용'));
+
+console.log('\n[13] 이미지 캡처 — 마스킹 해제');
+sh.querySelector('#mk').checked = false;
+await capture();
+check('인적사항이 그대로 찍힘', drawn !== null && SECRETS.every((s) => drawn.includes(s)));
+check('파일명에 지원자명 포함', /홍길동\.jpg$/.test(captured[0]?.name || ''), captured[0]?.name);
 
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${failures}건 실패\n`);
 if (process.env.DUMP) console.log(md);

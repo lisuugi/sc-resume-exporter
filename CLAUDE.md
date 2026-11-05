@@ -11,7 +11,7 @@
 | `build.mjs` | terser 최소화 → `javascript:` URL → `index.html` 주입 |
 | `index.html` | GitHub Pages 안내 페이지. 북마클릿 링크가 주입됨 |
 | `docs/PARSING.md` | 파싱 규칙과 **설계 근거**. 코드 수정 전 필독 |
-| `test/` | jsdom 기반 검증 38건 |
+| `test/` | jsdom 기반 검증 49건 |
 | `dist/` | 빌드 산출물. 직접 편집하지 말 것 |
 | `scripts/demo.mjs` | README 데모 스크린샷(`docs/assets/demo.png`) 생성. 픽스처만 사용 |
 | `.github/workflows/test.yml` | CI. 빌드 결과 커밋 여부 + src/dist 테스트 |
