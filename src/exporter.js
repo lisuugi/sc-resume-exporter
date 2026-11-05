@@ -297,36 +297,121 @@
 
   /* ===================================================================
    * 6. 개인정보 마스킹 (선택)
-   *    저장소·커뮤니티에 예시로 올릴 때를 위한 기능.
+   *    첨삭 요청·커뮤니티 공유용 사본을 만들 때 쓴다.
+   *
+   *  실제 양식의 라벨 표기를 전부 알 수 없으므로("영문 이름"/"영문성명" 등)
+   *  정확히 일치가 아니라 '키워드 포함'으로 판정한다. 공백을 빼고 소문자로 비교한다.
+   *
+   *  등급은 둘이다.
+   *    2 (IDENTITY)  값을 가리고, 그 값이 문서의 다른 곳(에세이, 다른 표)에
+   *                  다시 나오면 거기서도 가린다. 이름·학교·전공·회사처럼
+   *                  본문에 재등장해 신원을 드러내는 것.
+   *    1 (SENSITIVE) 값만 가린다. 주소·각종 번호처럼 재등장 검사가 무의미하거나,
+   *                  학력("학사")처럼 값이 흔한 단어라 퍼뜨리면 본문을 망가뜨리는 것.
+   *
+   *  에세이 문항("전공 역량을 기술하십시오.")은 키워드가 있어도 대상이 아니다.
+   *  문항째 가리면 첨삭용 사본의 의미가 없어진다.
    * =================================================================*/
-  var SENSITIVE_LABELS = ['지원자', '생년월일', '주소', '휴대폰 번호', '전화 번호', '이메일', '자격번호', '학번'];
+  var IDENTITY_KEYS = [
+    '지원자', '이름', '성명', '영문', '한자',                 // 이름
+    '학교', '대학', '고교', '캠퍼스', '전공', '학과', '학부',  // 학력
+    '회사', '기관명', '근무처', '직장', '부서'                 // 경력
+  ];
+  var SENSITIVE_KEYS = [
+    '학력', '생년', '생일', '나이', '성별', '사진',
+    '주소', '우편', '거주', '휴대', '전화', '연락처', '메일', 'email',
+    '번호', '학번', '주민', '여권', '군번', '보훈', '장애'
+  ];
+  var QUESTION_RE = /(십시오|하시오|세요|바랍니다|니까|\?)\.?$|기술하|서술하|작성하/;
   var MASK = '███ (마스킹)';
 
+  function maskLevel(label) {
+    var k = String(label || '').replace(/\s+/g, '').toLowerCase();
+    if (!k || k.length > 25 || QUESTION_RE.test(k)) return 0;
+    function has(keys) {
+      for (var i = 0; i < keys.length; i++) if (k.indexOf(keys[i]) !== -1) return true;
+      return false;
+    }
+    if (has(IDENTITY_KEYS)) return 2;
+    if (has(SENSITIVE_KEYS)) return 1;
+    return 0;
+  }
+
+  // 재등장 검사에 쓸 값. 숫자·기호뿐인 값과 한 글자 값은 오탐이 많아 뺀다.
+  // 본문에는 꾸밈 없이 나오므로 분류 접두어와 괄호를 벗긴 형태도 함께 등록한다.
+  //   "[기타]샘플회사"              → "샘플회사"
+  //   "샘플공학(샘플대-학사-주전공)" → "샘플공학", "샘플대-학사-주전공"
+  // "샘플팀 / 엔지니어" 같은 값은 쪼개지 않는다. 직무명은 흔한 단어라 본문을 망가뜨린다.
+  function collectTerms(value, terms) {
+    function add(v) {
+      v = v.trim();
+      if (v.length < 2 || v === '(없음)' || /^[\d\s.\-\/()~:]+$/.test(v)) return;
+      if (terms.indexOf(v) === -1) terms.push(v);
+    }
+    String(value).split(' | ').forEach(function (v) {
+      add(v);
+      var bare = v.trim().replace(/^\[[^\]]*\]\s*/, '');
+      add(bare);
+      var m = bare.match(/^(.+?)\s*\((.+)\)$/);
+      if (m) { add(m[1]); add(m[2]); }
+    });
+  }
+
+  function termMasker(terms) {
+    if (!terms.length) return function (s) { return String(s); };
+    // 긴 것부터 — "샘플공학(샘플대-학사-주전공)" 을 "샘플대" 보다 먼저 지운다.
+    var re = new RegExp(terms.slice()
+      .sort(function (a, b) { return b.length - a.length; })
+      .map(function (t) { return t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); })
+      .join('|'), 'g');
+    return function (s) { return String(s).replace(re, '███'); };
+  }
+
+  // 라벨과 무관하게 형태로 알아볼 수 있는 것.
   function maskText(s) {
     return String(s)
       .replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '███@███')
-      .replace(/(\+?\d{1,3}[-\s]?)?0?1[016-9][-\s]?\d{3,4}[-\s]?\d{4}/g, '███-████-████');
+      .replace(/\d{6}\s?-\s?[1-8]\d{6}/g, '██████-███████')                     // 주민·외국인등록번호
+      .replace(/(\+?\d{1,3}[-\s]?)?0?1[016-9][-\s]?\d{3,4}[-\s]?\d{4}/g, '███-████-████') // 휴대폰
+      .replace(/\b0\d{1,2}[-)\s]\d{3,4}-\d{4}\b/g, '███-████-████');             // 유선
   }
 
   function maskDoc(doc) {
-    doc.sections.forEach(function (sec) {
-      sec.blocks.forEach(function (b) {
-        if (b.type === 'field' || b.type === 'longfield') {
-          if (SENSITIVE_LABELS.indexOf(b.label) !== -1) b.value = MASK;
-          else b.value = maskText(b.value);
-        } else if (b.type === 'table') {
-          var hdr = b.rows[0];
-          b.rows = b.rows.map(function (r, ri) {
-            if (ri === 0) return r;
-            return r.map(function (cell, ci) {
-              if (SENSITIVE_LABELS.indexOf(hdr[ci]) !== -1) return '███';
-              return maskText(cell);
-            });
+    var terms = [];
+    function each(fn) {
+      doc.sections.forEach(function (sec) { sec.blocks.forEach(fn); });
+    }
+
+    // 1) 라벨 기준으로 가리면서 재등장 검사용 값을 모은다.
+    each(function (b) {
+      if (b.type === 'field' || b.type === 'longfield') {
+        var lv = maskLevel(b.label);
+        if (!lv) return;
+        if (lv === 2) collectTerms(b.value, terms);
+        b.type = 'field';
+        b.value = MASK;
+      } else if (b.type === 'table') {
+        var levels = b.rows[0].map(maskLevel);
+        b.rows = b.rows.map(function (r, ri) {
+          if (ri === 0) return r;
+          return r.map(function (cell, ci) {
+            if (!levels[ci]) return cell;
+            if (levels[ci] === 2) collectTerms(cell, terms);
+            return '███';
           });
-        } else if (b.type === 'text') {
-          b.value = maskText(b.value);
-        }
-      });
+        });
+      }
+    });
+
+    // 2) 나머지 전부에서 재등장 값과 형태 기반 패턴을 지운다.
+    var hide = termMasker(terms);
+    function scrub(s) { return maskText(hide(s)); }
+    each(function (b) {
+      if (b.type === 'field' || b.type === 'longfield' || b.type === 'text') b.value = scrub(b.value);
+      else if (b.type === 'heading') b.text = scrub(b.text);
+      else if (b.type === 'table') {
+        b.rows = b.rows.map(function (r, ri) { return ri === 0 ? r : r.map(scrub); });
+      }
     });
     return doc;
   }
@@ -339,7 +424,9 @@
    *  바꾼 노드와 원래 값은 rec 에 기록하고, 캡처가 끝나면 역순으로 되돌린다.
    *
    *  모델 마스킹(maskDoc)과 같은 규칙을 쓴다.
-   *    (a) 민감 라벨의 .dl 값 전체   (b) 표의 민감 열   (c) 나머지 글의 이메일·전화번호
+   *    (a) 민감 라벨의 .dl 값 전체   (b) 표의 민감 열
+   *    (c) 나머지 글에서 재등장 값과 형태 기반 패턴(이메일·전화·등록번호)
+   *  사진 같은 그림 요소는 captureImage 가 따로 숨긴다(스타일 복구 경로를 쓰므로).
    */
   function textNodes(el) {
     var out = [];
@@ -365,12 +452,18 @@
       });
     }
 
+    var terms = [];
+
     // (a)
     var dls = root.querySelectorAll('.dl');
     for (var i = 0; i < dls.length; i++) {
       var dt = dls[i].querySelector('.dt');
       var dd = dls[i].querySelector('.dd');
-      if (dt && dd && SENSITIVE_LABELS.indexOf(readLabel(dt)) !== -1) blank(dd, MASK);
+      if (!dt || !dd) continue;
+      var lv = maskLevel(readLabel(dt));
+      if (!lv) continue;
+      if (lv === 2) collectTerms(readValue(dd), terms);
+      blank(dd, MASK);
     }
 
     // (b) — 첫 행을 헤더로 본다(pushTable 과 같은 가정).
@@ -378,23 +471,34 @@
     for (var t = 0; t < tables.length; t++) {
       var trs = tables[t].querySelectorAll('tr');
       if (trs.length < 2) continue;
-      var cols = [];
-      for (var h = 0; h < trs[0].children.length; h++) {
-        if (SENSITIVE_LABELS.indexOf(readLabel(trs[0].children[h])) !== -1) cols.push(h);
-      }
-      if (!cols.length) continue;
+      var levels = [];
+      for (var h = 0; h < trs[0].children.length; h++) levels.push(maskLevel(readLabel(trs[0].children[h])));
       for (var r = 1; r < trs.length; r++) {
-        cols.forEach(function (c) {
-          if (trs[r].children[c]) blank(trs[r].children[c], '███');
-        });
+        for (var c = 0; c < trs[r].children.length; c++) {
+          var cell = trs[r].children[c];
+          if (!levels[c]) continue;
+          if (levels[c] === 2) collectTerms((cell.innerText || '').trim().replace(/\s+/g, ' '), terms);
+          blank(cell, '███');
+        }
       }
     }
 
     // (c)
+    var hide = termMasker(terms);
     textNodes(root).forEach(function (n) {
-      var m = maskText(n.data);
+      var m = maskText(hide(n.data));
       if (m !== n.data) setText(n, m);
     });
+  }
+
+  // 사진·그림 요소. 증명사진이 가장 강한 식별 정보다.
+  function mediaToHide(root) {
+    var out = Array.prototype.slice.call(root.querySelectorAll('img,picture,canvas,video,svg'));
+    var all = root.querySelectorAll('*');
+    for (var i = 0; i < all.length; i++) {
+      if (out.indexOf(all[i]) === -1 && /url\(/.test(getComputedStyle(all[i]).backgroundImage || '')) out.push(all[i]);
+    }
+    return out;
   }
 
   /* ===================================================================
@@ -580,6 +684,7 @@
         if (opts.mask) {
           onProgress('개인정보 가리는 중…');
           maskDom(ctx.root, texts);
+          mediaToHide(ctx.root).forEach(function (el) { set(el, 'visibility:hidden!important'); });
         }
 
         body.scrollTop = 0;

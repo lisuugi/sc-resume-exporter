@@ -33,6 +33,10 @@ export const HTML = `
             <div class="dl mFull"><h4 class="dt">주소</h4>
               <p class="dd"><span>국내</span><span>어느도 어느시 어느로 1 (샘플동) 101동 101호</span></p></div>
             <div class="dl"><h4 class="dt">휴대폰 번호</h4><p class="dd">+82-010-0000-0000</p></div>
+            <div class="dl"><h4 class="dt">영문 이름</h4><p class="dd">HONG GILDONG</p></div>
+            <div class="dl"><h4 class="dt">생년월일</h4><p class="dd">2000.01.01</p></div>
+            <div class="dl"><h4 class="dt">이메일</h4><p class="dd">gildong@example.com</p></div>
+            <div class="photo"><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="증명사진"></div>
           </div>
 
           <h3 class="groupTitle">이수교과목</h3>
@@ -78,6 +82,14 @@ export const HTML = `
               <h4 class="dt">성장과정을 기술하십시오.</h4>
               <p class="dd">[성장 소제목]
 성장과정 본문입니다.</p>
+            </div>
+            <!-- 문항에 '전공'이 들어 있어도 마스킹 대상이 아니다. 본문 속 학교·전공·이름은 가려져야 한다. -->
+            <div class="dl mFull">
+              <h4 class="dt">전공 역량을 기술하십시오.</h4>
+              <p class="dd">[전공 소제목]
+샘플대 샘플공학 수업에서 HONG GILDONG 이라는 이름으로 발표했습니다.
+
+샘플회사 인턴 때 배운 점도 적습니다.</p>
             </div>
           </div>
 
